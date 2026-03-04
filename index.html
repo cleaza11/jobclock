@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>До 19:00 / 07:00 (Киев) + прогресс</title>
+  <title>Таймер до 19:00 / 07:00 (Киев) + прогресс + мотивация</title>
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background:#0b1220; color:#e8eefc; }
@@ -12,19 +12,26 @@
     .row { display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; align-items:baseline; }
     h1 { margin:0 0 10px; font-size:20px; font-weight:800; letter-spacing:.2px; }
     .pill { padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.08); font-size:14px; }
-    .big { font-size: clamp(34px, 6vw, 56px); font-weight: 900; line-height: 1.05; margin: 8px 0 8px; }
+    .big { font-size: clamp(34px, 6vw, 56px); font-weight: 900; line-height: 1.05; margin: 8px 0 10px; }
     .muted { color: rgba(232,238,252,.75); font-size: 14px; }
-    .grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-top: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
     @media (max-width: 720px){ .grid { grid-template-columns: repeat(2, 1fr); } }
     .box { padding: 12px; border-radius: 14px; background: rgba(0,0,0,.18); }
     .label { font-size: 12px; color: rgba(232,238,252,.70); margin-bottom: 6px; }
     .value { font-size: 20px; font-weight: 800; }
+
     .barWrap { margin-top: 14px; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.18); }
     .barTop { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom: 8px; }
     .bar { height: 14px; border-radius: 999px; background: rgba(255,255,255,.10); overflow:hidden; }
     .fill { height: 100%; width: 0%; background: rgba(232,238,252,.85); border-radius: 999px; transition: width .35s linear; }
-    footer { margin-top: 14px; font-size: 12px; color: rgba(232,238,252,.65); }
     .hint { font-size: 12px; color: rgba(232,238,252,.65); }
+
+    /* Мотивация */
+    .motivationWrap { margin-top: 14px; padding: 14px; border-radius: 14px; background: rgba(0,0,0,.18); }
+    .motivationTitle { font-size: 12px; color: rgba(232,238,252,.70); margin-bottom: 8px; letter-spacing: .2px; }
+    .motivation { font-size: 16px; font-weight: 700; line-height: 1.35; }
+
+    footer { margin-top: 14px; font-size: 12px; color: rgba(232,238,252,.65); }
   </style>
 </head>
 <body>
@@ -64,12 +71,146 @@
       <div class="bar"><div class="fill" id="fill"></div></div>
     </div>
 
+    <div class="motivationWrap">
+      <div class="motivationTitle">Поддержка</div>
+      <div class="motivation" id="motivation">—</div>
+    </div>
+
     <footer>Обновление каждую секунду. Часовой пояс: Europe/Kyiv.</footer>
   </div>
 
   <script>
     const TZ = "Europe/Kyiv";
+
     const SHIFT_MS = 12 * 60 * 60 * 1000;
+    const MOTIVATION_EVERY_MS = 15000;
+
+    // Невозвратные фразы: храним и в памяти, и в localStorage (чтобы не повторялись даже после перезагрузки)
+    const usedMotivation = new Set(JSON.parse(localStorage.getItem("usedMotivation") || "[]"));
+    let lastMotivationAt = 0;
+
+    function saveUsedMotivation() {
+      // ограничим размер, чтобы storage не разрастался бесконечно
+      const arr = Array.from(usedMotivation);
+      const trimmed = arr.slice(Math.max(0, arr.length - 1500));
+      localStorage.setItem("usedMotivation", JSON.stringify(trimmed));
+    }
+
+    function pick(arr, seed) {
+      const idx = Math.abs(seed) % arr.length;
+      return arr[idx];
+    }
+
+    function buildMotivation(seed, isDay, isFinal90) {
+      // Большое комбинаторное пространство + разные наборы для режима
+      const openersDay = [
+        "Держи темп.",
+        "Ты на правильном пути.",
+        "Сфокусируйся на одном шаге.",
+        "Сейчас главное — стабильность.",
+        "Спокойно и ровно."
+      ];
+      const openersNight = [
+        "Тихий темп — тоже темп.",
+        "Спокойно, без рывков.",
+        "Ночь — время аккуратных побед.",
+        "Делай по одному шагу.",
+        "Ровно и без суеты."
+      ];
+
+      const verbs = [
+        "Закрой",
+        "Доделай",
+        "Дожми",
+        "Собери",
+        "Отметь",
+        "Упростись: сделай",
+        "Сконцентрируйся и сделай",
+        "Выбери и сделай"
+      ];
+      const targets = [
+        "один маленький пункт",
+        "самую важную задачу",
+        "самый лёгкий хвост",
+        "следующий блок работы",
+        "одно короткое действие",
+        "самый ясный шаг",
+        "одно “да” в списке дел",
+        "самое очевидное улучшение"
+      ];
+      const rewards = [
+        "— и станет легче продолжать.",
+        "— и появится инерция.",
+        "— и будет ощущение контроля.",
+        "— и день/ночь пойдёт в твою пользу.",
+        "— и прогресс станет видимым.",
+        "— и дальше пойдёт быстрее.",
+        "— и мозг скажет “спасибо”.",
+        "— и ты освободишь голову."
+      ];
+
+      // Когда остаётся <= 1:30 до конца ДНЯ — “финишный режим”
+      const final90 = [
+        "Финишный режим: выбери одну главную задачу и закрой её полностью.",
+        "Осталось немного: сейчас лучше всего убрать хвосты и закрепить результат.",
+        "Финиш близко: сделай “чистый финиш” — порядок, отправки, фиксы.",
+        "Последний рывок без стресса: маленькими шагами, но без остановок.",
+        "Финишная прямая: минимум отвлечений, максимум завершений."
+      ];
+
+      const closer = [
+        "Один шаг — и ещё один.",
+        "Ты справляешься.",
+        "Дальше проще, чем кажется.",
+        "Сделай сейчас — поблагодаришь себя позже.",
+        "Стабильно = быстро.",
+        "Главное — продолжать."
+      ];
+
+      const opener = isDay ? pick(openersDay, seed) : pick(openersNight, seed);
+      const mid = isFinal90
+        ? pick(final90, seed * 7 + 11)
+        : `${pick(verbs, seed * 3 + 5)} ${pick(targets, seed * 5 + 13)} ${pick(rewards, seed * 7 + 17)}`;
+      const end = pick(closer, seed * 11 + 23);
+
+      return `${opener} ${mid} ${end}`;
+    }
+
+    function updateMotivation(nowKyivUtcMs, endUtcMs, isDay) {
+      const el = document.getElementById("motivation");
+      if (!el) return;
+
+      const nowWall = Date.now();
+      if (nowWall - lastMotivationAt < MOTIVATION_EVERY_MS && el.textContent && el.textContent !== "—") return;
+
+      const leftMs = endUtcMs - nowKyivUtcMs;
+      const isFinal90 = isDay && leftMs > 0 && leftMs <= 90 * 60 * 1000;
+
+      // seed берём от киевского времени с шагом 15 секунд
+      const seedBase = Math.floor(nowKyivUtcMs / MOTIVATION_EVERY_MS);
+
+      let attempt = 0;
+      let phrase = "";
+      while (attempt < 5000) {
+        const seed = seedBase + attempt * 97; // прыгаем по пространству
+        phrase = buildMotivation(seed, isDay, isFinal90);
+
+        if (!usedMotivation.has(phrase)) {
+          usedMotivation.add(phrase);
+          saveUsedMotivation();
+          break;
+        }
+        attempt++;
+      }
+
+      // страховка: если вдруг всё занято (почти нереально) — добавим уникальный хвост
+      if (usedMotivation.has(phrase) && attempt >= 5000) {
+        phrase = phrase + ` • ${seedBase}`;
+      }
+
+      el.textContent = phrase;
+      lastMotivationAt = nowWall;
+    }
 
     function getKyivParts(date = new Date()) {
       const dtf = new Intl.DateTimeFormat("en-GB", {
@@ -83,7 +224,7 @@
       return { y:+map.year, m:+map.month, d:+map.day, hh:+map.hour, mm:+map.minute, ss:+map.second };
     }
 
-    // UTC timestamp для "yyyy-mm-dd hh:mm:ss" в Киеве
+    // Возвращает UTC timestamp для "yyyy-mm-dd hh:mm:ss" в Киеве
     function kyivLocalToUtcMs(y, m, d, hh, mm, ss) {
       const assumedUtc = Date.UTC(y, m - 1, d, hh, mm, ss);
 
@@ -101,7 +242,7 @@
       return assumedUtc + (assumedUtc - shownUtc);
     }
 
-    function pad2(n){ return String(n).padStart(2,"0"); }
+    function pad2(n) { return String(n).padStart(2, "0"); }
 
     function formatHMS(ms) {
       const total = Math.max(0, Math.floor(ms / 1000));
@@ -111,14 +252,13 @@
       return { h, m, s, text: `${pad2(h)}:${pad2(m)}:${pad2(s)}` };
     }
 
-    function tick(){
+    function tick() {
       const now = new Date();
       const k = getKyivParts(now);
 
-      // UI "сейчас"
-      document.getElementById("kyivNow").textContent = `${pad2(k.hh)}:${pad2(k.mm)}:${pad2(k.ss)}`;
+      document.getElementById("kyivNow").textContent =
+        `${pad2(k.hh)}:${pad2(k.mm)}:${pad2(k.ss)}`;
 
-      // "сейчас" в UTC ms с учетом киевского времени
       const nowKyivUtcMs = kyivLocalToUtcMs(k.y, k.m, k.d, k.hh, k.mm, k.ss);
 
       // Определяем период (07-19 или 19-07) и границы
@@ -189,6 +329,9 @@
       const leftMin = Math.max(0, Math.floor(diffToEnd / 60000));
       document.getElementById("details").textContent =
         `Осталось: ${hmsToEnd.h}ч ${hmsToEnd.m}м ${hmsToEnd.s}с (≈ ${leftMin} мин)`;
+
+      // Подбадривающий текст (обновляется раз в 15 секунд, без повторов)
+      updateMotivation(nowKyivUtcMs, endUtcMs, (k.hh >= 7 && k.hh < 19));
     }
 
     tick();
