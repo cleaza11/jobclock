@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>До 19:00 / 07:00 (Киев) + прогресс</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background:#0b1220; color:#e8eefc; }
+    .card { width:min(820px,92vw); padding:22px; border-radius:18px; background:rgba(255,255,255,.06);
+      box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .row { display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; align-items:baseline; }
+    h1 { margin:0 0 10px; font-size:20px; font-weight:800; letter-spacing:.2px; }
+    .pill { padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.08); font-size:14px; }
+    .big { font-size: clamp(34px, 6vw, 56px); font-weight: 900; line-height: 1.05; margin: 8px 0 8px; }
+    .muted { color: rgba(232,238,252,.75); font-size: 14px; }
+    .grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-top: 12px; }
+    @media (max-width: 720px){ .grid { grid-template-columns: repeat(2, 1fr); } }
+    .box { padding: 12px; border-radius: 14px; background: rgba(0,0,0,.18); }
+    .label { font-size: 12px; color: rgba(232,238,252,.70); margin-bottom: 6px; }
+    .value { font-size: 20px; font-weight: 800; }
+    .barWrap { margin-top: 14px; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.18); }
+    .barTop { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom: 8px; }
+    .bar { height: 14px; border-radius: 999px; background: rgba(255,255,255,.10); overflow:hidden; }
+    .fill { height: 100%; width: 0%; background: rgba(232,238,252,.85); border-radius: 999px; transition: width .35s linear; }
+    footer { margin-top: 14px; font-size: 12px; color: rgba(232,238,252,.65); }
+    .hint { font-size: 12px; color: rgba(232,238,252,.65); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="row">
+      <h1>Отсчёт до 19:00 или 07:00 (по Киеву)</h1>
+      <div class="pill" id="mode">—</div>
+    </div>
+
+    <div class="big" id="countdown">--:--:--</div>
+    <div class="muted" id="nextTarget">—</div>
+
+    <div class="grid">
+      <div class="box">
+        <div class="label">Сейчас в Киеве</div>
+        <div class="value" id="kyivNow">--:--:--</div>
+      </div>
+      <div class="box">
+        <div class="label">Текущая смена</div>
+        <div class="value" id="shiftLabel">—</div>
+      </div>
+      <div class="box">
+        <div class="label">Прошло</div>
+        <div class="value" id="elapsed">—</div>
+      </div>
+      <div class="box">
+        <div class="label">Прогресс</div>
+        <div class="value" id="percent">—</div>
+      </div>
+    </div>
+
+    <div class="barWrap">
+      <div class="barTop">
+        <div class="pill" id="range">—</div>
+        <div class="hint" id="details">—</div>
+      </div>
+      <div class="bar"><div class="fill" id="fill"></div></div>
+    </div>
+
+    <footer>Обновление каждую секунду. Часовой пояс: Europe/Kyiv.</footer>
+  </div>
+
+  <script>
+    const TZ = "Europe/Kyiv";
+    const SHIFT_MS = 12 * 60 * 60 * 1000;
+
+    function getKyivParts(date = new Date()) {
+      const dtf = new Intl.DateTimeFormat("en-GB", {
+        timeZone: TZ,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hourCycle: "h23"
+      });
+      const parts = dtf.formatToParts(date);
+      const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+      return { y:+map.year, m:+map.month, d:+map.day, hh:+map.hour, mm:+map.minute, ss:+map.second };
+    }
+
+    // UTC timestamp для "yyyy-mm-dd hh:mm:ss" в Киеве
+    function kyivLocalToUtcMs(y, m, d, hh, mm, ss) {
+      const assumedUtc = Date.UTC(y, m - 1, d, hh, mm, ss);
+
+      const fmt = new Intl.DateTimeFormat("en-GB", {
+        timeZone: TZ,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hourCycle: "h23"
+      });
+
+      const parts = fmt.formatToParts(new Date(assumedUtc));
+      const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+      const shownUtc = Date.UTC(+map.year, +map.month - 1, +map.day, +map.hour, +map.minute, +map.second);
+
+      return assumedUtc + (assumedUtc - shownUtc);
+    }
+
+    function pad2(n){ return String(n).padStart(2,"0"); }
+
+    function formatHMS(ms) {
+      const total = Math.max(0, Math.floor(ms / 1000));
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      return { h, m, s, text: `${pad2(h)}:${pad2(m)}:${pad2(s)}` };
+    }
+
+    function tick(){
+      const now = new Date();
+      const k = getKyivParts(now);
+
+      // UI "сейчас"
+      document.getElementById("kyivNow").textContent = `${pad2(k.hh)}:${pad2(k.mm)}:${pad2(k.ss)}`;
+
+      // "сейчас" в UTC ms с учетом киевского времени
+      const nowKyivUtcMs = kyivLocalToUtcMs(k.y, k.m, k.d, k.hh, k.mm, k.ss);
+
+      // Определяем период (07-19 или 19-07) и границы
+      let modeLabel, shiftLabel, rangeLabel;
+      let startUtcMs, endUtcMs;
+
+      if (k.hh >= 7 && k.hh < 19) {
+        // 07:00 -> 19:00 (сегодня)
+        modeLabel = "Режим: 07:00 → 19:00";
+        shiftLabel = "ДЕНЬ";
+        rangeLabel = "07:00 — 19:00";
+        startUtcMs = kyivLocalToUtcMs(k.y, k.m, k.d, 7, 0, 0);
+        endUtcMs   = kyivLocalToUtcMs(k.y, k.m, k.d, 19, 0, 0);
+      } else {
+        // 19:00 -> 07:00 (через полночь)
+        modeLabel = "Режим: 19:00 → 07:00";
+        shiftLabel = "НОЧЬ";
+        rangeLabel = "19:00 — 07:00";
+
+        // старт: сегодня 19:00 если сейчас >=19, иначе вчера 19:00
+        const base = new Date(Date.UTC(k.y, k.m - 1, k.d, 12, 0, 0));
+        const startBase = new Date(base);
+        if (k.hh < 7) startBase.setUTCDate(startBase.getUTCDate() - 1);
+
+        const sy = startBase.getUTCFullYear();
+        const sm = startBase.getUTCMonth() + 1;
+        const sd = startBase.getUTCDate();
+
+        startUtcMs = kyivLocalToUtcMs(sy, sm, sd, 19, 0, 0);
+
+        // конец: 07:00 следующего дня после старта
+        const endBase = new Date(startBase);
+        endBase.setUTCDate(endBase.getUTCDate() + 1);
+
+        const ey = endBase.getUTCFullYear();
+        const em = endBase.getUTCMonth() + 1;
+        const ed = endBase.getUTCDate();
+
+        endUtcMs = kyivLocalToUtcMs(ey, em, ed, 7, 0, 0);
+      }
+
+      // До конца смены
+      const diffToEnd = endUtcMs - nowKyivUtcMs;
+      const hmsToEnd = formatHMS(diffToEnd);
+      document.getElementById("countdown").textContent = hmsToEnd.text;
+
+      // Прогресс
+      const elapsedMs = Math.max(0, nowKyivUtcMs - startUtcMs);
+      const clampedElapsed = Math.min(SHIFT_MS, elapsedMs);
+      const pct = Math.max(0, Math.min(100, (clampedElapsed / SHIFT_MS) * 100));
+
+      const elapsedHms = formatHMS(clampedElapsed);
+      document.getElementById("elapsed").textContent = elapsedHms.text;
+      document.getElementById("percent").textContent = `${pct.toFixed(1)}%`;
+
+      const fill = document.getElementById("fill");
+      fill.style.width = `${pct}%`;
+
+      // Подписи
+      document.getElementById("mode").textContent = modeLabel;
+      document.getElementById("shiftLabel").textContent = shiftLabel;
+      document.getElementById("range").textContent = rangeLabel;
+
+      const endParts = getKyivParts(new Date(endUtcMs));
+      document.getElementById("nextTarget").textContent =
+        `Ближайшая цель: ${pad2(endParts.hh)}:${pad2(endParts.mm)} (Киев) — ${pad2(endParts.d)}.${pad2(endParts.m)}.${endParts.y}`;
+
+      const leftMin = Math.max(0, Math.floor(diffToEnd / 60000));
+      document.getElementById("details").textContent =
+        `Осталось: ${hmsToEnd.h}ч ${hmsToEnd.m}м ${hmsToEnd.s}с (≈ ${leftMin} мин)`;
+    }
+
+    tick();
+    setInterval(tick, 1000);
+  </script>
+</body>
+</html>
